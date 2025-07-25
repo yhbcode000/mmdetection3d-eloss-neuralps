@@ -1,12 +1,15 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from mmcv.cnn.bricks import ConvModule
+from typing import Sequence
 
-from mmdet3d.ops import DGCNNFPModule
-from ..builder import HEADS
+from mmcv.cnn.bricks import ConvModule
+from torch import Tensor
+
+from mmdet3d.models.layers import DGCNNFPModule
+from mmdet3d.registry import MODELS
 from .decode_head import Base3DDecodeHead
 
 
-@HEADS.register_module()
+@MODELS.register_module()
 class DGCNNHead(Base3DDecodeHead):
     r"""DGCNN decoder head.
 
@@ -15,11 +18,12 @@ class DGCNNHead(Base3DDecodeHead):
     `reimplementation code <https://github.com/AnTao97/dgcnn.pytorch>`_.
 
     Args:
-        fp_channels (tuple[int], optional): Tuple of mlp channels in feature
+        fp_channels (Sequence[int]): Tuple of mlp channels in feature
             propagation (FP) modules. Defaults to (1216, 512).
     """
 
-    def __init__(self, fp_channels=(1216, 512), **kwargs):
+    def __init__(self, fp_channels: Sequence[int] = (1216, 512),
+                 **kwargs) -> None:
         super(DGCNNHead, self).__init__(**kwargs)
 
         self.FP_module = DGCNNFPModule(
@@ -35,27 +39,27 @@ class DGCNNHead(Base3DDecodeHead):
             norm_cfg=self.norm_cfg,
             act_cfg=self.act_cfg)
 
-    def _extract_input(self, feat_dict):
+    def _extract_input(self, feat_dict: dict) -> Tensor:
         """Extract inputs from features dictionary.
 
         Args:
             feat_dict (dict): Feature dict from backbone.
 
         Returns:
-            torch.Tensor: points for decoder.
+            torch.Tensor: Points for decoder.
         """
         fa_points = feat_dict['fa_points']
 
         return fa_points
 
-    def forward(self, feat_dict):
+    def forward(self, feat_dict: dict) -> Tensor:
         """Forward pass.
 
         Args:
             feat_dict (dict): Feature dict from backbone.
 
         Returns:
-            torch.Tensor: Segmentation map of shape [B, num_classes, N].
+            Tensor: Segmentation map of shape [B, num_classes, N].
         """
         fa_points = self._extract_input(feat_dict)
 

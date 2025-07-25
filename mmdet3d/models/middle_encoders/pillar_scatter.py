@@ -1,12 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from typing import List
+
 import torch
-from mmcv.runner import auto_fp16
-from torch import nn
+from torch import Tensor, nn
 
-from ..builder import MIDDLE_ENCODERS
+from mmdet3d.registry import MODELS
 
 
-@MIDDLE_ENCODERS.register_module()
+@MODELS.register_module()
 class PointPillarsScatter(nn.Module):
     """Point Pillar's Scatter.
 
@@ -17,16 +18,17 @@ class PointPillarsScatter(nn.Module):
         output_shape (list[int]): Required output shape of features.
     """
 
-    def __init__(self, in_channels, output_shape):
+    def __init__(self, in_channels: int, output_shape: List[int]):
         super().__init__()
         self.output_shape = output_shape
         self.ny = output_shape[0]
         self.nx = output_shape[1]
         self.in_channels = in_channels
-        self.fp16_enabled = False
 
-    @auto_fp16(apply_to=('voxel_features', ))
-    def forward(self, voxel_features, coors, batch_size=None):
+    def forward(self,
+                voxel_features: Tensor,
+                coors: Tensor,
+                batch_size: int = None) -> Tensor:
         """Foraward function to scatter features."""
         # TODO: rewrite the function in a batch manner
         # no need to deal with different batch cases
@@ -35,7 +37,7 @@ class PointPillarsScatter(nn.Module):
         else:
             return self.forward_single(voxel_features, coors)
 
-    def forward_single(self, voxel_features, coors):
+    def forward_single(self, voxel_features: Tensor, coors: Tensor) -> Tensor:
         """Scatter features of single sample.
 
         Args:
@@ -50,16 +52,17 @@ class PointPillarsScatter(nn.Module):
             dtype=voxel_features.dtype,
             device=voxel_features.device)
 
-        indices = coors[:, 1] * self.nx + coors[:, 2]
+        indices = coors[:, 2] * self.nx + coors[:, 3]
         indices = indices.long()
         voxels = voxel_features.t()
         # Now scatter the blob back to the canvas.
         canvas[:, indices] = voxels
         # Undo the column stacking to final 4-dim tensor
         canvas = canvas.view(1, self.in_channels, self.ny, self.nx)
-        return [canvas]
+        return canvas
 
-    def forward_batch(self, voxel_features, coors, batch_size):
+    def forward_batch(self, voxel_features: Tensor, coors: Tensor,
+                      batch_size: int) -> Tensor:
         """Scatter features of single sample.
 
         Args:

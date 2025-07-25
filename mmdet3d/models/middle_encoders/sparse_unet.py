@@ -1,13 +1,26 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from typing import Dict, List, Optional, Tuple
+
 import torch
-from mmcv.runner import BaseModule, auto_fp16
+from torch import Tensor, nn
 
-from mmdet3d.ops import SparseBasicBlock, make_sparse_convmodule
-from mmdet3d.ops import spconv as spconv
-from ..builder import MIDDLE_ENCODERS
+from mmdet3d.models.layers.spconv import IS_SPCONV2_AVAILABLE
+
+if IS_SPCONV2_AVAILABLE:
+    from spconv.pytorch import SparseConvTensor, SparseSequential
+else:
+    from mmcv.ops import SparseConvTensor, SparseSequential
+
+from mmengine.model import BaseModule
+
+from mmdet3d.models.layers import SparseBasicBlock, make_sparse_convmodule
+from mmdet3d.models.layers.sparse_block import replace_feature
+from mmdet3d.registry import MODELS
+
+TwoTupleIntType = Tuple[Tuple[int]]
 
 
-@MIDDLE_ENCODERS.register_module()
+@MODELS.register_module()
 class SparseUNet(BaseModule):
     r"""SparseUNet for PartA^2.
 
@@ -27,21 +40,28 @@ class SparseUNet(BaseModule):
         decoder_paddings (tuple[tuple[int]]): Paddings of each decode block.
     """
 
-    def __init__(self,
-                 in_channels,
-                 sparse_shape,
-                 order=('conv', 'norm', 'act'),
-                 norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
-                 base_channels=16,
-                 output_channels=128,
-                 encoder_channels=((16, ), (32, 32, 32), (64, 64, 64), (64, 64,
-                                                                        64)),
-                 encoder_paddings=((1, ), (1, 1, 1), (1, 1, 1), ((0, 1, 1), 1,
-                                                                 1)),
-                 decoder_channels=((64, 64, 64), (64, 64, 32), (32, 32, 16),
-                                   (16, 16, 16)),
-                 decoder_paddings=((1, 0), (1, 0), (0, 0), (0, 1)),
-                 init_cfg=None):
+    def __init__(
+            self,
+            in_channels: int,
+            sparse_shape: List[int],
+            order: Tuple[str] = ('conv', 'norm', 'act'),
+            norm_cfg: dict = dict(type='BN1d', eps=1e-3, momentum=0.01),
+            base_channels: int = 16,
+            output_channels: int = 128,
+            encoder_channels: Optional[TwoTupleIntType] = ((16, ), (32, 32,
+                                                                    32),
+                                                           (64, 64,
+                                                            64), (64, 64, 64)),
+            encoder_paddings: Optional[TwoTupleIntType] = ((1, ), (1, 1, 1),
+                                                           (1, 1, 1),
+                                                           ((0, 1, 1), 1, 1)),
+            decoder_channels: Optional[TwoTupleIntType] = ((64, 64,
+                                                            64), (64, 64, 32),
+                                                           (32, 32,
+                                                            16), (16, 16, 16)),
+            decoder_paddings: Optional[TwoTupleIntType] = ((1, 0), (1, 0),
+                                                           (0, 0), (0, 1)),
+            init_cfg: bool = None):
         super().__init__(init_cfg=init_cfg)
         self.sparse_shape = sparse_shape
         self.in_channels = in_channels
@@ -53,7 +73,6 @@ class SparseUNet(BaseModule):
         self.decoder_channels = decoder_channels
         self.decoder_paddings = decoder_paddings
         self.stage_num = len(self.encoder_channels)
-        self.fp16_enabled = False
         # Spconv init all weight on its own
 
         assert isinstance(order, tuple) and len(order) == 3
@@ -94,8 +113,8 @@ class SparseUNet(BaseModule):
             indice_key='spconv_down2',
             conv_type='SparseConv3d')
 
-    @auto_fp16(apply_to=('voxel_features', ))
-    def forward(self, voxel_features, coors, batch_size):
+    def forward(self, voxel_features: Tensor, coors: Tensor,
+                batch_size: int) -> Dict[str, Tensor]:
         """Forward of SparseUNet.
 
         Args:
@@ -108,9 +127,8 @@ class SparseUNet(BaseModule):
             dict[str, torch.Tensor]: Backbone features.
         """
         coors = coors.int()
-        input_sp_tensor = spconv.SparseConvTensor(voxel_features, coors,
-                                                  self.sparse_shape,
-                                                  batch_size)
+        input_sp_tensor = SparseConvTensor(voxel_features, coors,
+                                           self.sparse_shape, batch_size)
         x = self.conv_input(input_sp_tensor)
 
         encode_features = []
@@ -147,8 +165,10 @@ class SparseUNet(BaseModule):
 
         return ret
 
-    def decoder_layer_forward(self, x_lateral, x_bottom, lateral_layer,
-                              merge_layer, upsample_layer):
+    def decoder_layer_forward(
+            self, x_lateral: SparseConvTensor, x_bottom: SparseConvTensor,
+            lateral_layer: SparseBasicBlock, merge_layer: SparseSequential,
+            upsample_layer: SparseSequential) -> SparseConvTensor:
         """Forward of upsample and residual block.
 
         Args:
@@ -162,15 +182,17 @@ class SparseUNet(BaseModule):
             :obj:`SparseConvTensor`: Upsampled feature.
         """
         x = lateral_layer(x_lateral)
-        x.features = torch.cat((x_bottom.features, x.features), dim=1)
+        x = replace_feature(x, torch.cat((x_bottom.features, x.features),
+                                         dim=1))
         x_merge = merge_layer(x)
         x = self.reduce_channel(x, x_merge.features.shape[1])
-        x.features = x_merge.features + x.features
+        x = replace_feature(x, x_merge.features + x.features)
         x = upsample_layer(x)
         return x
 
     @staticmethod
-    def reduce_channel(x, out_channels):
+    def reduce_channel(x: SparseConvTensor,
+                       out_channels: int) -> SparseConvTensor:
         """reduce channel for element-wise addition.
 
         Args:
@@ -185,11 +207,11 @@ class SparseUNet(BaseModule):
         n, in_channels = features.shape
         assert (in_channels % out_channels
                 == 0) and (in_channels >= out_channels)
-
-        x.features = features.view(n, out_channels, -1).sum(dim=2)
+        x = replace_feature(x, features.view(n, out_channels, -1).sum(dim=2))
         return x
 
-    def make_encoder_layers(self, make_block, norm_cfg, in_channels):
+    def make_encoder_layers(self, make_block: nn.Module, norm_cfg: dict,
+                            in_channels: int) -> int:
         """make encoder layers using sparse convs.
 
         Args:
@@ -200,7 +222,7 @@ class SparseUNet(BaseModule):
         Returns:
             int: The number of encoder output channels.
         """
-        self.encoder_layers = spconv.SparseSequential()
+        self.encoder_layers = SparseSequential()
 
         for i, blocks in enumerate(self.encoder_channels):
             blocks_list = []
@@ -231,11 +253,12 @@ class SparseUNet(BaseModule):
                             conv_type='SubMConv3d'))
                 in_channels = out_channels
             stage_name = f'encoder_layer{i + 1}'
-            stage_layers = spconv.SparseSequential(*blocks_list)
+            stage_layers = SparseSequential(*blocks_list)
             self.encoder_layers.add_module(stage_name, stage_layers)
         return out_channels
 
-    def make_decoder_layers(self, make_block, norm_cfg, in_channels):
+    def make_decoder_layers(self, make_block: nn.Module, norm_cfg: dict,
+                            in_channels: int) -> int:
         """make decoder layers using sparse convs.
 
         Args:

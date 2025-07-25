@@ -1,47 +1,40 @@
-ARG PYTORCH="1.6.0"
-ARG CUDA="10.1"
-ARG CUDNN="7"
+ARG PYTORCH="1.9.0"
+ARG CUDA="11.1"
+ARG CUDNN="8"
 
 FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
 
-ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX"
-ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
-ENV CMAKE_PREFIX_PATH="$(dirname $(which conda))/../"
+ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6+PTX" \
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
+    FORCE_CUDA="1"
 
-#更换国内源文件
-RUN apt-get update\
-    && apt install ca-certificates
-COPY ./sources.list /etc/apt/sources.list
+# Avoid Public GPG key error
+# https://github.com/NVIDIA/nvidia-docker/issues/1631
+RUN rm /etc/apt/sources.list.d/cuda.list \
+    && rm /etc/apt/sources.list.d/nvidia-ml.list \
+    && apt-key del 7fa2af80 \
+    && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub \
+    && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub
 
+# (Optional, use Mirror to speed up downloads)
+# RUN sed -i 's/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/mirrors.aliyun.com\/ubuntu\//g' /etc/apt/sources.list && \
+#    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Install the required packages
 RUN apt-get update \
-    && DEBIAN_FRONTEND="noninteractive" apt-get install -y ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 \
+    && apt-get install -y ffmpeg libsm6 libxext6 git ninja-build libglib2.0-0 libsm6 libxrender-dev libxext6 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install MMCV, MMDetection and MMSegmentation
-RUN pip install "mmcv-full>=1.3.17, <=1.5.0" -f https://download.openmmlab.com/mmcv/dist/cu101/torch1.6.0/index.html
-RUN pip install "mmdet>=2.19.0, <=3.0.0"
-RUN pip install "mmsegmentation>=0.20.0, <=1.0.0" 
+# Install MMEngine, MMCV and MMDetection
+RUN pip install openmim && \
+    mim install "mmengine" "mmcv>=2.0.0rc4" "mmdet>=3.0.0"
 
 # Install MMDetection3D
-RUN conda clean --all
-ENV FORCE_CUDA="1"
-# RUN pip install "mmdet3d==v1.0.0rc0"
-
-#安装Open-SSH
-RUN apt-get update \
-    && echo "#!/bin/sh\nexit 0" > /usr/sbin/policy-rc.d \
-    && DEBIAN_FRONTEND="noninteractive" apt-get install -y openssh-server
-
-#设置用于ssh连接的root密码
-RUN echo 'root:kongge2022'|chpasswd
-RUN mkdir -p /var/run/sshd
-
-#允许root连接
-RUN echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
-
-# 开放 22 端口
-EXPOSE 22
-CMD ["/usr/sbin/sshd", "-D"]
+RUN conda clean --all \
+    && git clone https://github.com/open-mmlab/mmdetection3d.git -b dev-1.x /mmdetection3d \
+    && cd /mmdetection3d \
+    && pip install --no-cache-dir -e .
 
 WORKDIR /mmdetection3d

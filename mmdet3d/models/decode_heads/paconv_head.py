@@ -1,11 +1,15 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from mmcv.cnn.bricks import ConvModule
+from typing import Sequence
 
-from ..builder import HEADS
+from mmcv.cnn.bricks import ConvModule
+from torch import Tensor
+
+from mmdet3d.registry import MODELS
+from mmdet3d.utils.typing_utils import ConfigType
 from .pointnet2_head import PointNet2Head
 
 
-@HEADS.register_module()
+@MODELS.register_module()
 class PAConvHead(PointNet2Head):
     r"""PAConv decoder head.
 
@@ -13,17 +17,23 @@ class PAConvHead(PointNet2Head):
     Refer to the `official code <https://github.com/CVMI-Lab/PAConv>`_.
 
     Args:
-        fp_channels (tuple[tuple[int]]): Tuple of mlp channels in FP modules.
-        fp_norm_cfg (dict): Config of norm layers used in FP modules.
-            Default: dict(type='BN2d').
+        fp_channels (Sequence[Sequence[int]]): Tuple of mlp channels in FP
+            modules. Defaults to ((768, 256, 256), (384, 256, 256),
+            (320, 256, 128), (128 + 6, 128, 128, 128)).
+        fp_norm_cfg (dict or :obj:`ConfigDict`): Config of norm layers used in
+            FP modules. Defaults to dict(type='BN2d').
     """
 
     def __init__(self,
-                 fp_channels=((768, 256, 256), (384, 256, 256),
-                              (320, 256, 128), (128 + 6, 128, 128, 128)),
-                 fp_norm_cfg=dict(type='BN2d'),
-                 **kwargs):
-        super(PAConvHead, self).__init__(fp_channels, fp_norm_cfg, **kwargs)
+                 fp_channels: Sequence[Sequence[int]] = ((768, 256, 256),
+                                                         (384, 256, 256),
+                                                         (320, 256,
+                                                          128), (128 + 6, 128,
+                                                                 128, 128)),
+                 fp_norm_cfg: ConfigType = dict(type='BN2d'),
+                 **kwargs) -> None:
+        super(PAConvHead, self).__init__(
+            fp_channels=fp_channels, fp_norm_cfg=fp_norm_cfg, **kwargs)
 
         # https://github.com/CVMI-Lab/PAConv/blob/main/scene_seg/model/pointnet2/pointnet2_paconv_seg.py#L53
         # PointNet++'s decoder conv has bias while PAConv's doesn't have
@@ -37,7 +47,7 @@ class PAConvHead(PointNet2Head):
             norm_cfg=self.norm_cfg,
             act_cfg=self.act_cfg)
 
-    def forward(self, feat_dict):
+    def forward(self, feat_dict: dict) -> Tensor:
         """Forward pass.
 
         Args:

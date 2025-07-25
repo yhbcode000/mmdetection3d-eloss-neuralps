@@ -1,83 +1,29 @@
-Welcome to MMDetection3D's documentation!
+欢迎来到 MMDetection3D 文档！
 ==========================================
 
 .. toctree::
    :maxdepth: 1
    :caption: 开始你的第一步
 
-   getting_started.md
+   get_started.md
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 使用指南
+
+   user_guides/index.rst
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 进阶教程
+
+   advanced_guides/index.rst
 
 .. toctree::
    :maxdepth: 1
-   :caption: 演示
+   :caption: 迁移版本
 
-   demo.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 模型库
-
-   model_zoo.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 数据预处理
-
-   data_preparation.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 使用现有数据及模型
-
-   1_exist_data_model.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 创建新的数据与模型
-
-   2_new_data_model.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 支持的任务
-
-   supported_tasks/index.rst
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 数据集介绍
-
-   datasets/index.rst
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 教程
-
-   tutorials/index.rst
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 实用工具与脚本
-
-   useful_tools.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 说明
-
-   benchmarks.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 常见问题
-
-   faq.md
-
-.. toctree::
-   :maxdepth: 1
-   :caption: 兼容性
-
-   compatibility.md
+   migration.md
 
 .. toctree::
    :maxdepth: 1
@@ -87,6 +33,17 @@ Welcome to MMDetection3D's documentation!
 
 .. toctree::
    :maxdepth: 1
+   :caption: 模型仓库
+
+   model_zoo.md
+
+.. toctree::
+   :maxdepth: 1
+   :caption: 说明
+
+   notes/index.rst
+
+.. toctree::
    :caption: 语言切换
 
    switch_language.md

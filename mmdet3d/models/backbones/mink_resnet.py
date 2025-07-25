@@ -1,32 +1,33 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 # Follow https://github.com/NVIDIA/MinkowskiEngine/blob/master/examples/resnet.py # noqa
 # and mmcv.cnn.ResNet
+from typing import List, Union
+
 try:
     import MinkowskiEngine as ME
+    from MinkowskiEngine import SparseTensor
     from MinkowskiEngine.modules.resnet_block import BasicBlock, Bottleneck
 except ImportError:
-    import warnings
-    warnings.warn(
-        'Please follow `getting_started.md` to install MinkowskiEngine.`')
     # blocks are used in the static part of MinkResNet
-    BasicBlock, Bottleneck = None, None
+    ME = BasicBlock = Bottleneck = SparseTensor = None
 
 import torch.nn as nn
+from mmengine.model import BaseModule
 
-from mmdet3d.models.builder import BACKBONES
+from mmdet3d.registry import MODELS
 
 
-@BACKBONES.register_module()
-class MinkResNet(nn.Module):
+@MODELS.register_module()
+class MinkResNet(BaseModule):
     r"""Minkowski ResNet backbone. See `4D Spatio-Temporal ConvNets
     <https://arxiv.org/abs/1904.08755>`_ for more details.
 
     Args:
         depth (int): Depth of resnet, from {18, 34, 50, 101, 152}.
-        in_channels (ont): Number of input channels, 3 for RGB.
-        num_stages (int, optional): Resnet stages. Default: 4.
-        pool (bool, optional): Add max pooling after first conv if True.
-            Default: True.
+        in_channels (int): Number of input channels, 3 for RGB.
+        num_stages (int): Resnet stages. Defaults to 4.
+        pool (bool): Whether to add max pooling after first conv.
+            Defaults to True.
     """
     arch_settings = {
         18: (BasicBlock, (2, 2, 2, 2)),
@@ -36,8 +37,15 @@ class MinkResNet(nn.Module):
         152: (Bottleneck, (3, 8, 36, 3))
     }
 
-    def __init__(self, depth, in_channels, num_stages=4, pool=True):
+    def __init__(self,
+                 depth: int,
+                 in_channels: int,
+                 num_stages: int = 4,
+                 pool: bool = True):
         super(MinkResNet, self).__init__()
+        if ME is None:
+            raise ImportError(
+                'Please follow `get_started.md` to install MinkowskiEngine.`')
         if depth not in self.arch_settings:
             raise KeyError(f'invalid depth {depth} for resnet')
         assert 4 >= num_stages >= 1
@@ -56,12 +64,13 @@ class MinkResNet(nn.Module):
             self.maxpool = ME.MinkowskiMaxPooling(
                 kernel_size=2, stride=2, dimension=3)
 
-        for i, num_blocks in enumerate(stage_blocks):
+        for i in range(len(stage_blocks)):
             setattr(
-                self, f'layer{i}',
+                self, f'layer{i + 1}',
                 self._make_layer(block, 64 * 2**i, stage_blocks[i], stride=2))
 
     def init_weights(self):
+        """Initialize weights."""
         for m in self.modules():
             if isinstance(m, ME.MinkowskiConvolution):
                 ME.utils.kaiming_normal_(
@@ -71,7 +80,19 @@ class MinkResNet(nn.Module):
                 nn.init.constant_(m.bn.weight, 1)
                 nn.init.constant_(m.bn.bias, 0)
 
-    def _make_layer(self, block, planes, blocks, stride):
+    def _make_layer(self, block: Union[BasicBlock, Bottleneck], planes: int,
+                    blocks: int, stride: int) -> nn.Module:
+        """Make single level of residual blocks.
+
+        Args:
+            block (BasicBlock | Bottleneck): Residual block class.
+            planes (int): Number of convolution filters.
+            blocks (int): Number of blocks in the layers.
+            stride (int): Stride of the first convolutional layer.
+
+        Returns:
+            nn.Module: With residual blocks.
+        """
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -91,11 +112,11 @@ class MinkResNet(nn.Module):
                 downsample=downsample,
                 dimension=3))
         self.inplanes = planes * block.expansion
-        for i in range(1, blocks):
+        for _ in range(1, blocks):
             layers.append(block(self.inplanes, planes, stride=1, dimension=3))
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x: SparseTensor) -> List[SparseTensor]:
         """Forward pass of ResNet.
 
         Args:
@@ -111,6 +132,6 @@ class MinkResNet(nn.Module):
             x = self.maxpool(x)
         outs = []
         for i in range(self.num_stages):
-            x = getattr(self, f'layer{i}')(x)
+            x = getattr(self, f'layer{i + 1}')(x)
             outs.append(x)
         return outs

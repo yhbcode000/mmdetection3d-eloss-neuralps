@@ -7,7 +7,7 @@ import torch
 from ts.torch_handler.base_handler import BaseHandler
 
 from mmdet3d.apis import inference_detector, init_model
-from mmdet3d.core.points import get_points_type
+from mmdet3d.structures.points import get_points_type
 
 
 class MMdet3dHandler(BaseHandler):
@@ -105,10 +105,10 @@ class MMdet3dHandler(BaseHandler):
         for pts_index, result in enumerate(data):
             output.append([])
             if 'pts_bbox' in result.keys():
-                pred_bboxes = result['pts_bbox']['boxes_3d'].tensor.numpy()
+                pred_bboxes = result['pts_bbox']['boxes_3d'].numpy()
                 pred_scores = result['pts_bbox']['scores_3d'].numpy()
             else:
-                pred_bboxes = result['boxes_3d'].tensor.numpy()
+                pred_bboxes = result['boxes_3d'].numpy()
                 pred_scores = result['scores_3d'].numpy()
 
             index = pred_scores > self.threshold

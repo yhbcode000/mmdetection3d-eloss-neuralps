@@ -1,16 +1,18 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
 import warnings
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from mmcv.cnn import ConvModule
-from mmcv.runner import BaseModule, auto_fp16
-from torch import nn as nn
+from mmengine.model import BaseModule
+from torch import Tensor, nn
 
-from ..builder import BACKBONES, build_backbone
+from mmdet3d.registry import MODELS
+from mmdet3d.utils import ConfigType, OptMultiConfig
 
 
-@BACKBONES.register_module()
+@MODELS.register_module()
 class MultiBackbone(BaseModule):
     """MultiBackbone with different configs.
 
@@ -27,16 +29,17 @@ class MultiBackbone(BaseModule):
     """
 
     def __init__(self,
-                 num_streams,
-                 backbones,
-                 aggregation_mlp_channels=None,
-                 conv_cfg=dict(type='Conv1d'),
-                 norm_cfg=dict(type='BN1d', eps=1e-5, momentum=0.01),
-                 act_cfg=dict(type='ReLU'),
-                 suffixes=('net0', 'net1'),
-                 init_cfg=None,
-                 pretrained=None,
-                 **kwargs):
+                 num_streams: int,
+                 backbones: Union[List[dict], Dict],
+                 aggregation_mlp_channels: Optional[Sequence[int]] = None,
+                 conv_cfg: ConfigType = dict(type='Conv1d'),
+                 norm_cfg: ConfigType = dict(
+                     type='BN1d', eps=1e-5, momentum=0.01),
+                 act_cfg: ConfigType = dict(type='ReLU'),
+                 suffixes: Tuple[str] = ('net0', 'net1'),
+                 init_cfg: OptMultiConfig = None,
+                 pretrained: Optional[str] = None,
+                 **kwargs) -> None:
         super().__init__(init_cfg=init_cfg)
         assert isinstance(backbones, dict) or isinstance(backbones, list)
         if isinstance(backbones, dict):
@@ -56,7 +59,7 @@ class MultiBackbone(BaseModule):
 
         for backbone_cfg in backbones:
             out_channels += backbone_cfg['fp_channels'][-1][-1]
-            self.backbone_list.append(build_backbone(backbone_cfg))
+            self.backbone_list.append(MODELS.build(backbone_cfg))
 
         # Feature aggregation layers
         if aggregation_mlp_channels is None:
@@ -89,8 +92,7 @@ class MultiBackbone(BaseModule):
                           'please use "init_cfg" instead')
             self.init_cfg = dict(type='Pretrained', checkpoint=pretrained)
 
-    @auto_fp16()
-    def forward(self, points):
+    def forward(self, points: Tensor) -> dict:
         """Forward pass.
 
         Args:
@@ -115,10 +117,11 @@ class MultiBackbone(BaseModule):
             cur_ret = self.backbone_list[ind](points)
             cur_suffix = self.suffixes[ind]
             fp_features.append(cur_ret['fp_features'][-1])
+            cur_ret_new = dict()
             if cur_suffix != '':
                 for k in cur_ret.keys():
-                    cur_ret[k + '_' + cur_suffix] = cur_ret.pop(k)
-            ret.update(cur_ret)
+                    cur_ret_new[k + '_' + cur_suffix] = cur_ret[k]
+            ret.update(cur_ret_new)
 
         # Combine the features here
         hd_feature = torch.cat(fp_features, dim=1)
