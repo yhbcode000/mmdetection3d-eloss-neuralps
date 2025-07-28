@@ -11,6 +11,9 @@
 #SBATCH --error=logs/exp00_base_%j.err
 
 # Create logs directory if it doesn't exist
+
+cd ..
+
 mkdir -p logs
 
 # Set environment variables
