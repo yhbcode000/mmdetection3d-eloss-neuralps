@@ -132,9 +132,4 @@ The main files for our project are located in the following directories. These f
 This project is built upon the excellent [MMDetection3D](https://github.com/open-mmlab/mmdetection3d) codebase. We thank the OpenMMLab team for their contributions to the community.
 
 4090 cuda12.4
-pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121
-pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html
-pip install openmim
-mim install mmengine
-mim install 'mmdet>=3.0.0'
-pip install -e . --no-build-isolation
+uv pip install -e . --no-build-isolation
