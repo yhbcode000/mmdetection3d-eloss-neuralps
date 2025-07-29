@@ -1,6 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from mmengine.structures import InstanceData
@@ -30,6 +30,8 @@ class MVXTwoStageDetector(Base3DDetector):
             image features. Defaults to None.
         pts_neck (dict, optional): Neck of extracting
             points features. Defaults to None.
+        net_loss (dict, optional): Config dict of network structure loss.
+            Defaults to None.
         pts_bbox_head (dict, optional): Bboxes head of
             point cloud modality. Defaults to None.
         img_roi_head (dict, optional): RoI head of image
@@ -54,6 +56,7 @@ class MVXTwoStageDetector(Base3DDetector):
                  pts_backbone: Optional[dict] = None,
                  img_neck: Optional[dict] = None,
                  pts_neck: Optional[dict] = None,
+                 net_loss: Optional[dict] = None,
                  pts_bbox_head: Optional[dict] = None,
                  img_roi_head: Optional[dict] = None,
                  img_rpn_head: Optional[dict] = None,
@@ -90,6 +93,10 @@ class MVXTwoStageDetector(Base3DDetector):
             self.img_rpn_head = MODELS.build(img_rpn_head)
         if img_roi_head is not None:
             self.img_roi_head = MODELS.build(img_roi_head)
+
+        # Initialize net_loss if provided
+        if net_loss is not None:
+            self.net_loss = MODELS.build(net_loss)
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
@@ -159,7 +166,11 @@ class MVXTwoStageDetector(Base3DDetector):
         """bool: Whether the detector has a middle encoder."""
         return hasattr(self,
                        'middle_encoder') and self.middle_encoder is not None
-
+    @property
+    def with_net_loss(self) -> bool:
+        """bool: Whether the detector has a loss related to structure."""
+        return hasattr(self, 'net_loss') and self.net_loss is not None
+    
     def _forward(self):
         pass
 
@@ -184,92 +195,87 @@ class MVXTwoStageDetector(Base3DDetector):
         return img_feats
 
     def extract_pts_feat(
-            self,
-            voxel_dict: Dict[str, Tensor],
-            points: Optional[List[Tensor]] = None,
-            img_feats: Optional[Sequence[Tensor]] = None,
-            batch_input_metas: Optional[List[dict]] = None
-    ) -> Sequence[Tensor]:
-        """Extract features of points.
-
-        Args:
-            voxel_dict(Dict[str, Tensor]): Dict of voxelization infos.
-            points (List[tensor], optional):  Point cloud of multiple inputs.
-            img_feats (list[Tensor], tuple[tensor], optional): Features from
-                image backbone.
-            batch_input_metas (list[dict], optional): The meta information
-                of multiple samples. Defaults to True.
+        self,
+        voxel_dict: Dict[str, Tensor],
+        points: Optional[List[Tensor]] = None,
+        img_feats: Optional[Sequence[Tensor]] = None,
+        batch_input_metas: Optional[List[dict]] = None
+    ) -> Tuple[Sequence[Tensor], Optional[dict]]:
+        """Extract features of points and optional network info.
 
         Returns:
-            Sequence[tensor]: points features of multiple inputs
-            from backbone or neck.
+            Tuple[Sequence[tensor], dict]: A tuple contains points features
+            and an optional dict of network info for loss calculation.
         """
         if not self.with_pts_bbox:
-            return None
+            return None, None
+        
+        net_info = None
         voxel_features = self.pts_voxel_encoder(voxel_dict['voxels'],
                                                 voxel_dict['num_points'],
                                                 voxel_dict['coors'], img_feats,
                                                 batch_input_metas)
         batch_size = voxel_dict['coors'][-1, 0] + 1
         x = self.pts_middle_encoder(voxel_features, voxel_dict['coors'],
-                                    batch_size)
+                                     batch_size)
+        
         x = self.pts_backbone(x)
+        # Check if backbone returns features and net_info
+        if self.with_net_loss and isinstance(x, (list, tuple)):
+            x, net_info = x
+
         if self.with_pts_neck:
             x = self.pts_neck(x)
-        return x
+            # Check if neck also returns features and net_info
+            if self.with_net_loss and isinstance(x, (list, tuple)):
+                x, net_info = x
+                
+        return x, net_info
 
     def extract_feat(self, batch_inputs_dict: dict,
                      batch_input_metas: List[dict]) -> tuple:
         """Extract features from images and points.
 
-        Args:
-            batch_inputs_dict (dict): Dict of batch inputs. It
-                contains
-
-                - points (List[tensor]):  Point cloud of multiple inputs.
-                - imgs (tensor): Image tensor with shape (B, C, H, W).
-            batch_input_metas (list[dict]): Meta information of multiple inputs
-                in a batch.
-
         Returns:
-             tuple: Two elements in tuple arrange as
-             image features and point cloud features.
+            tuple: A tuple contains image features, point cloud features,
+            and an optional dict of network info.
         """
         voxel_dict = batch_inputs_dict.get('voxels', None)
         imgs = batch_inputs_dict.get('imgs', None)
         points = batch_inputs_dict.get('points', None)
+        
         img_feats = self.extract_img_feat(imgs, batch_input_metas)
-        pts_feats = self.extract_pts_feat(
+        
+        pts_feats, net_info = self.extract_pts_feat(
             voxel_dict,
             points=points,
             img_feats=img_feats,
             batch_input_metas=batch_input_metas)
-        return (img_feats, pts_feats)
+        
+        return (img_feats, pts_feats, net_info)
 
     def loss(self, batch_inputs_dict: Dict[List, torch.Tensor],
              batch_data_samples: List[Det3DDataSample],
-             **kwargs) -> List[Det3DDataSample]:
+             **kwargs) -> Dict[str, Tensor]:
         """
         Args:
-            batch_inputs_dict (dict): The model input dict which include
-                'points' and `imgs` keys.
-
-                - points (list[torch.Tensor]): Point cloud of each sample.
-                - imgs (torch.Tensor): Tensor of batch images, has shape
-                  (B, C, H ,W)
-            batch_data_samples (List[:obj:`Det3DDataSample`]): The Data
-                Samples. It usually includes information such as
-                `gt_instance_3d`, .
+            batch_inputs_dict (dict): The model input dict.
+            batch_data_samples (List[:obj:`Det3DDataSample`]): The Data Samples.
 
         Returns:
             dict[str, Tensor]: A dictionary of loss components.
-
         """
 
         batch_input_metas = [item.metainfo for item in batch_data_samples]
-        img_feats, pts_feats = self.extract_feat(batch_inputs_dict,
-                                                 batch_input_metas)
+        img_feats, pts_feats, net_info = self.extract_feat(batch_inputs_dict,
+                                                     batch_input_metas)
         losses = dict()
+
+        # Calculate net_loss from intermediate features if applicable
+        if self.with_net_loss and net_info is not None:
+            losses_net = self.net_loss(net_info)
+            losses.update(losses_net)
+
         if pts_feats:
             losses_pts = self.pts_bbox_head.loss(pts_feats, batch_data_samples,
                                                  **kwargs)
@@ -277,6 +283,7 @@ class MVXTwoStageDetector(Base3DDetector):
         if img_feats:
             losses_img = self.loss_imgs(img_feats, batch_data_samples)
             losses.update(losses_img)
+            
         return losses
 
     def loss_imgs(self, x: List[Tensor],
@@ -362,32 +369,19 @@ class MVXTwoStageDetector(Base3DDetector):
                 batch_data_samples: List[Det3DDataSample],
                 **kwargs) -> List[Det3DDataSample]:
         """Forward of testing.
-
         Args:
-            batch_inputs_dict (dict): The model input dict which include
-                'points' keys.
-
-                - points (list[torch.Tensor]): Point cloud of each sample.
-            batch_data_samples (List[:obj:`Det3DDataSample`]): The Data
-                Samples. It usually includes information such as
-                `gt_instance_3d`.
+            batch_inputs_dict (dict): The model input dict.
+            batch_data_samples (List[:obj:`Det3DDataSample`]): The Data Samples.
 
         Returns:
-            list[:obj:`Det3DDataSample`]: Detection results of the
-            input sample. Each Det3DDataSample usually contain
-            'pred_instances_3d'. And the ``pred_instances_3d`` usually
-            contains following keys.
-
-            - scores_3d (Tensor): Classification scores, has a shape
-                (num_instances, )
-            - labels_3d (Tensor): Labels of bboxes, has a shape
-                (num_instances, ).
-            - bbox_3d (:obj:`BaseInstance3DBoxes`): Prediction of bboxes,
-                contains a tensor with shape (num_instances, 7).
+            list[:obj:`Det3DDataSample`]: Detection results of the input sample.
         """
         batch_input_metas = [item.metainfo for item in batch_data_samples]
-        img_feats, pts_feats = self.extract_feat(batch_inputs_dict,
-                                                 batch_input_metas)
+        
+        # Ignore net_info during inference
+        img_feats, pts_feats, _ = self.extract_feat(batch_inputs_dict,
+                                                  batch_input_metas)
+                                                  
         if pts_feats and self.with_pts_bbox:
             results_list_3d = self.pts_bbox_head.predict(
                 pts_feats, batch_data_samples, **kwargs)
@@ -395,7 +389,6 @@ class MVXTwoStageDetector(Base3DDetector):
             results_list_3d = None
 
         if img_feats and self.with_img_bbox:
-            # TODO check this for camera modality
             results_list_2d = self.predict_imgs(img_feats, batch_data_samples,
                                                 **kwargs)
         else:

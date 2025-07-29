@@ -1,9 +1,14 @@
 _base_ = [
-    '../_base_/models/pointpillars_hv_fpn_nus.py',
-    '../_base_/datasets/nus-3d.py',
-    '../_base_/schedules/schedule-2x.py',
+    # './models/pointpillars_hv_fpn_nus.py',
+    './models/pointpillars_hv_fpn_nus_eloss.py',
+    # './datasets/nus-3d.py',
+    './datasets/nus-3d-noise.py',
+    './schedules/schedule-1x.py',
     '../_base_/default_runtime.py',
 ]
+
+load_from = "/workspace/mmdetection3d-eloss-neuralps2026/checkpoints/hv_pointpillars_fpn_sbn-all_4x8_2x_nus-3d_20210826_104936-fca299c1.pth"
+
 # model settings
 model = dict(
     pts_neck=dict(
@@ -46,3 +51,4 @@ model = dict(
 # interval to be 24. Please change the interval accordingly if you do not
 # use a default schedule.
 train_cfg = dict(val_interval=24)
+
